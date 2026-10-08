@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compute in Transit 02 — Data Movement in LLM Training</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&family=Geist+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #1c1815;
+            --bg-card: #231e1a;
+            --bg-code: #2b2520;
+            --text-primary: #efe8dc;
+            --text-secondary: #a2978b;
+            --accent: #6cb6c4;
+            --accent-dim: #6cb6c444;
+            --accent-glow: #6cb6c433;
+            --border: #3a322b;
+            --font-display: 'Bricolage Grotesque', sans-serif;
+            --font-mono: 'Geist Mono', 'Geist Mono', monospace;
+            --font-body: 'Instrument Sans', sans-serif;
+            --max-width: 900px;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            font-size: 17px;
+            line-height: 1.7;
+            overflow-x: hidden;
+        }
+
+        /* ── Header ── */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem 1.5rem;
+            text-align: center;
+            position: relative;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .hero > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .series-label {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+
+        .hero h1 {
+            font-family: var(--font-display);
+            font-size: clamp(2rem, 5vw, 3.2rem);
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+            margin-bottom: 1rem;
+        }
+
+        .hero h1 .accent {
+            color: var(--accent);
+        }
+
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin-bottom: 2rem;
+        }
+
+        /* ── Tag Pills ── */
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .tag {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            background: var(--accent-dim);
+            white-space: nowrap;
+        }
+
+        /* ── Pipeline Flow Bar ── */
+        .pipeline {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.25rem;
+            margin-bottom: 1rem;
+            max-width: var(--max-width);
+        }
+
+        .pipeline-step {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            padding: 0.3rem 0.7rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .pipeline-arrow {
+            color: var(--accent);
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+
+        /* ── Slides ── */
+        .slide {
+            min-height: 100vh;
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 4rem 1.5rem;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .slide-number {
+            font-family: var(--font-display);
+            font-size: 5rem;
+            font-weight: 700;
+            color: var(--accent-dim);
+            position: absolute;
+            top: 2rem;
+            right: 1.5rem;
+            line-height: 1;
+            user-select: none;
+        }
+
+        .slide h2 {
+            font-family: var(--font-display);
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 1.5rem;
+            line-height: 1.25;
+        }
+
+        .slide h3 {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .slide p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .slide p strong {
+            color: var(--text-primary);
+        }
+
+        .slide ul, .slide ol {
+            margin-bottom: 1rem;
+            padding-left: 1.5rem;
+            color: var(--text-secondary);
+        }
+
+        .slide li {
+            margin-bottom: 0.4rem;
+        }
+
+        .slide li strong {
+            color: var(--text-primary);
+        }
+
+        /* ── Code Blocks ── */
+        .code-block {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 1.25rem 0;
+            overflow: hidden;
+        }
+
+        .code-header {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent);
+            background: rgba(108,182,196,0.08);
+            padding: 0.4rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .code-block pre {
+            margin: 0;
+            padding: 1rem;
+            overflow-x: auto;
+        }
+
+        .code-block code {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.6;
+            color: #dad1c5;
+        }
+
+        /* Syntax highlighting (manual) */
+        .kw { color: #de805a; }
+        .fn { color: #d7bbdf; }
+        .str { color: #bcdbd4; }
+        .cm { color: #a2978b; font-style: italic; }
+        .num { color: #97cdc6; }
+        .type { color: #e3b174; }
+        .dir { color: #de805a; }
+        .mac { color: #e3b174; }
+
+        /* ── Tables ── */
+        .table-wrap {
+            overflow-x: auto;
+            margin: 1.25rem 0;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th {
+            background: var(--bg-code);
+            color: var(--accent);
+            font-weight: 600;
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            font-family: var(--font-display);
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:nth-child(even) td {
+            background: rgba(35,30,26,0.5);
+        }
+
+        /* ── Diagrams ── */
+        .diagram-flow {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .diagram-box {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .diagram-box.accent {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(108,182,196,0.08);
+        }
+
+        .diagram-box.dim {
+            color: var(--text-secondary);
+            border-color: var(--border);
+        }
+
+        .diagram-arrow {
+            color: var(--accent);
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+
+        /* Vertical flow diagrams */
+        .diagram-vertical {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.3rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .diagram-vertical .diagram-arrow {
+            font-size: 1.1rem;
+        }
+
+        /* Nested hierarchy diagram */
+        .hierarchy {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .hierarchy-level {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .hierarchy-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            min-width: 80px;
+            text-align: right;
+        }
+
+        .hierarchy-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+        }
+
+        .hierarchy-item {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        .hierarchy-item.accent {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(108,182,196,0.08);
+        }
+
+        /* Grid diagram */
+        .diagram-grid {
+            display: grid;
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .diagram-grid.cols-2 {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .diagram-grid.cols-3 {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+
+        .diagram-panel {
+            padding: 1rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+
+        .diagram-panel.accent-border {
+            border-left: 3px solid var(--accent);
+        }
+
+        .diagram-panel h4 {
+            font-family: var(--font-display);
+            font-size: 1rem;
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+
+        .diagram-panel p, .diagram-panel ul {
+            font-size: 0.85rem;
+        }
+
+        /* ── Callout Boxes ── */
+        .callout {
+            background: var(--bg-card);
+            border-left: 3px solid var(--accent);
+            border-radius: 0 8px 8px 0;
+            padding: 1rem 1.25rem;
+            margin: 1.25rem 0;
+        }
+
+        .callout p {
+            margin-bottom: 0;
+        }
+
+        .callout .callout-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.3rem;
+        }
+
+        /* ── Tier Visual ── */
+        .tier-visual {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .tier-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .tier-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            min-width: 90px;
+            text-align: right;
+        }
+
+        .tier-fill {
+            height: 32px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            padding: 0 0.75rem;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            white-space: nowrap;
+            transition: width 0.6s ease;
+        }
+
+        .tier-cost {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            min-width: 70px;
+        }
+
+        /* ── Contents list ── */
+        .contents-list {
+            list-style: none;
+            padding-left: 0;
+            counter-reset: contents;
+        }
+
+        .contents-list li {
+            counter-increment: contents;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .contents-list li:last-child {
+            border-bottom: none;
+        }
+
+        .contents-list li::before {
+            content: counter(contents, decimal-leading-zero);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            min-width: 2rem;
+        }
+
+        .contents-list a {
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .contents-list a:hover {
+            color: var(--accent);
+        }
+
+        /* ── Footer ── */
+        .footer {
+            text-align: center;
+            padding: 3rem 1.5rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+            max-width: var(--max-width);
+            margin: 0 auto;
+        }
+
+        .footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 640px) {
+            .slide {
+                padding: 3rem 1rem;
+                min-height: auto;
+            }
+
+            .slide-number {
+                font-size: 3rem;
+                top: 1.5rem;
+                right: 1rem;
+            }
+
+            .slide h2 {
+                font-size: 1.5rem;
+            }
+
+            .diagram-grid.cols-2,
+            .diagram-grid.cols-3 {
+                grid-template-columns: 1fr;
+            }
+
+            .pipeline {
+                gap: 0.15rem;
+            }
+
+            .pipeline-step {
+                font-size: 0.6rem;
+                padding: 0.2rem 0.4rem;
+            }
+
+            .hero h1 {
+                font-size: 1.8rem;
+            }
+
+            table {
+                font-size: 0.78rem;
+            }
+
+            .tier-label {
+                min-width: 60px;
+                font-size: 0.65rem;
+            }
+
+            .tier-fill {
+                font-size: 0.6rem;
+                height: 26px;
+            }
+        }
+
+        /* ── Interactive controls (added for Local LLM series) ── */
+        .control-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin: 1.25rem 0;
+        }
+        .control-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+        .control-row label {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            min-width: 180px;
+        }
+        .control-row input[type="range"] {
+            flex: 1;
+            min-width: 160px;
+            accent-color: var(--accent);
+        }
+        .control-row input[type="number"],
+        .control-row select {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            border-radius: 4px;
+            padding: 0.3rem 0.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+        .control-row .val {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            min-width: 80px;
+            text-align: right;
+        }
+        .btn {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            padding: 0.4rem 0.9rem;
+            background: var(--accent-dim);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+        .btn:hover { background: rgba(108,182,196,0.2); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn.secondary {
+            background: var(--bg-code);
+            color: var(--text-secondary);
+            border-color: var(--border);
+        }
+        .result-box {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--accent);
+            border-radius: 4px;
+            padding: 0.75rem 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            margin-top: 0.75rem;
+        }
+        .result-box .line-label { color: var(--text-secondary); }
+        .result-box .line-val   { color: var(--accent); font-weight: 600; }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        .metric {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.6rem 0.8rem;
+            text-align: center;
+        }
+        .metric .metric-label {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .metric .metric-value {
+            font-family: var(--font-display);
+            font-size: 1.25rem;
+            color: var(--accent);
+            font-weight: 600;
+            margin-top: 0.2rem;
+        }
+
+        /* Canvas / SVG containers */
+        .canvas-wrap {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1.25rem 0;
+            overflow-x: auto;
+        }
+        .canvas-wrap canvas,
+        .canvas-wrap svg {
+            display: block;
+            margin: 0 auto;
+            max-width: 100%;
+        }
+
+        /* Small inline badge */
+        .badge {
+            display: inline-block;
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+            padding: 0.1rem 0.45rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            vertical-align: middle;
+            margin-left: 0.3rem;
+        }
+        .badge.ok    { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+        .badge.warn  { border-color: #e3b174; color: #e3b174; background: rgba(227,177,116,0.08); }
+        .badge.bad   { border-color: #de805a; color: #de805a; background: rgba(222,128,90,0.08); }
+
+
+        /* ── LLM Inference Simulators additions ── */
+        .canvas-wrap canvas { image-rendering: auto; display: block; width: 100%; height: auto; }
+        .canvas-wrap svg { max-width: 100%; height: auto; }
+        .ladder { display: grid; gap: 0.4rem; margin: 1.25rem 0; }
+        .ladder-row {
+            display: grid; grid-template-columns: 11rem 1fr 7.5rem; gap: 0.75rem; align-items: center;
+            background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+            padding: 0.55rem 0.85rem; font-size: 0.88rem;
+        }
+        .ladder-row .rung { font-family: var(--font-display); font-weight: 600; color: var(--accent); }
+        .ladder-row .speed { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-secondary); text-align: right; }
+        .res-list { list-style: none; padding: 0; margin: 0.75rem 0; }
+        .res-list li { padding: 0.6rem 0; border-bottom: 1px solid var(--border); font-size: 0.92rem; }
+        .res-list li:last-child { border-bottom: none; }
+        .res-list .what { color: var(--text-secondary); display: block; font-size: 0.86rem; margin-top: 0.15rem; }
+        .res-list a { color: var(--accent); text-decoration: none; }
+        .res-list a:hover { text-decoration: underline; }
+        .qa { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; margin: 0.6rem 0; padding: 0.2rem 1rem; }
+        .qa summary { cursor: pointer; padding: 0.6rem 0; font-weight: 600; }
+        .qa p, .qa ul { margin-bottom: 0.75rem; font-size: 0.92rem; }
+        .sim-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.4rem 1.25rem; }
+        .chart-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+        .chart-title { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.3rem; }
+        .slide a { color: var(--accent); }
+        @media (max-width: 640px) {
+            .ladder-row { grid-template-columns: 1fr; gap: 0.2rem; }
+            .ladder-row .speed { text-align: left; }
+        }
+        .concepts { background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; padding: 0.75rem 1rem; margin-top: 1.25rem; font-size: 0.88rem; }
+        .concepts p { margin: 0 0 0.4rem; color: var(--text-secondary); }
+        .concepts .chips { display: flex; flex-wrap: wrap; gap: 0.35rem 0.5rem; }
+        .concepts .chips a { border: 1px solid var(--border); border-radius: 999px; padding: 0.1rem 0.6rem; text-decoration: none; font-size: 0.82rem; }
+        .concepts .chips a:hover { border-color: var(--accent); }
+        .hero { overflow: hidden; }   /* the 600px glow must not widen the page on phones */
+        .chart-pair > *, .diagram-grid > *, .sim-grid > * { min-width: 0; }   /* let wide code scroll inside its column */
+        .slide p code, .slide li code, .slide td code { overflow-wrap: anywhere; }
+        @media (max-width: 640px) { .diagram-box { white-space: normal; max-width: 100%; } }   /* long boxes must wrap on phones */
+        /* FOptInf: keep long titles clear of the slide number on phones */
+        @media (max-width: 640px) { .slide h2 { padding-right: 3.6rem; } }
+        .sim-grid select, .sim-grid input[type="range"] { max-width: 100%; min-width: 0; }   /* long option labels must not spill into the next column */
+    </style>
+</head>
+<body>
+
+<header class="hero">
+    <div class="series-label">Compute in Transit &mdash; Presentation 02</div>
+    <h1><span class="accent">Data Movement</span> in LLM Training</h1>
+    <p class="subtitle">What each kind of parallelism puts on the wire, how large a gradient sync is and where links bind; in-network aggregation, low-communication training, and frequency-domain compression of gradients and momentum; and a planned experiment to test whether a DCT-based compressor can run on a photonic link module.</p>
+
+    <div class="tags">
+        <span class="tag">Ring all-reduce</span>
+        <span class="tag">In-network aggregation</span>
+        <span class="tag">DiLoCo</span>
+        <span class="tag">DeMo</span>
+        <span class="tag">DCT compression</span>
+        <span class="tag">Fixed band vs top-k</span>
+    </div>
+
+    <div class="pipeline">
+        <span class="pipeline-step">Local steps</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Gradient or momentum</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Transform + select</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Link</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Aggregate</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Update</span>
+    </div>
+</header>
+
+<section class="slide" id="slide-00">
+    <div class="slide-number">00</div>
+    <h2>Topics We'll Cover</h2>
+    <ul class="contents-list">
+        <li><a href="#slide-01">The Traffic Each Kind of Parallelism Creates</a></li>
+        <li><a href="#slide-02">How Big Is a Gradient Sync?</a></li>
+        <li><a href="#slide-03">Ring All-Reduce Arithmetic</a></li>
+        <li><a href="#slide-04">Interactive: Where Links Bind</a></li>
+        <li><a href="#slide-05">In-Network Aggregation</a></li>
+        <li><a href="#slide-06">Low-Communication Training: the DiLoCo Family</a></li>
+        <li><a href="#slide-07">Frequency-Domain Gradient Compression</a></li>
+        <li><a href="#slide-08">DeMo: Decoupled Momentum and the DCT</a></li>
+        <li><a href="#slide-09">Mapping DeMo onto a Photonic Link Module</a></li>
+        <li><a href="#slide-10">The Fixed-Band Experiment (Planned)</a></li>
+        <li><a href="#slide-11">From Convergence to Wall-Clock</a></li>
+        <li><a href="#slide-12">Other Training Traffic</a></li>
+        <li><a href="#slide-13">What to Take Away</a></li>
+    </ul>
+    <div class="concepts">
+        <p><strong>Concepts used here, and where they are explained.</strong> Each links to an entry in the <a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#glossary">series glossary</a>, or in a sister series' glossary for concepts it already explains.</p>
+        <div class="chips"><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-paralleltraffic" title="Each way of splitting training across devices puts different traffic on the wire: gradients for data parallel, weights and gradients for FSDP/ZeRO, activations for tensor and pipeline parallel, KV blocks for ring attention, tokens for expert parallel.">Traffic of each parallelism</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-fsdp" title="Fully sharded data parallel (ZeRO stage 3): each worker holds a shard of weights, gradients and optimiser state, all-gathers weights before use and reduce-scatters gradients after the backward pass.">FSDP and ZeRO</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-ringallreduce" title="A reduce-scatter followed by an all-gather round a ring of N workers; each worker sends 2(N-1)/N times the buffer, close to twice the buffer whatever N is.">Ring all-reduce</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-ringattention" title="Context parallelism in which each device holds a block of the sequence and passes key-value blocks round a ring, so every query block sees every key block once per layer.">Ring attention</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-alltoall" title="Expert parallelism sends each token to the device holding its chosen expert and back: an all-to-all exchange in every MoE layer.">MoE all-to-all</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-ina" title="Summing workers&#x27; gradient updates inside network switches (SwitchML on Tofino, SHARP in InfiniBand) so each worker sends and receives one copy. It needs the flows to meet, so it belongs in a switch.">In-network aggregation</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-diloco" title="Workers take many local optimiser steps, then exchange a pseudo-gradient (the change in parameters) and apply an outer optimiser step; communication falls by the number of inner steps.">Low-communication training (DiLoCo)</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-errorfeedback" title="Keeping the part of an update that compression discarded and adding it back next time, so the error is delayed rather than lost.">Error feedback</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-freqcompress" title="Transforming a gradient or momentum tensor (FFT or DCT) and sending only some coefficients, on the premise that energy concentrates in few coefficients.">Frequency-domain gradient compression</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-demo" title="Decoupled Momentum Optimization: each worker keeps its own momentum, DCTs it in chunks, sends only the top-k components and subtracts what it sent; no per-step all-reduce of full gradients.">DeMo (decoupled momentum)</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-fixedband" title="Keeping a fixed set of transform coefficients instead of the largest: a gather with no comparisons, which suits a module limited to FFT, NTT, modular arithmetic and MAC, but only keeps the energy if it sits in that band.">Fixed band against top-k</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#g-opsperbyte" title="A link module&#x27;s compute rate divided by its line rate: the arithmetic it can apply to each byte without slowing the link. 0.40 to 3.96 for a QSFP56 module on this series&#x27; reading.">Operations per byte</a><a href="https://brendanjameslynskey.github.io/FHE_Hub_Accelerator_Simulators/#g-enob" title="Effective number of bits: the real precision of an analogue chain.">ENOB</a><a href="https://brendanjameslynskey.github.io/LLM_Hub_Fourier_Optics_Inference/#g-floatenob" title="For float workloads the analogue chain must match the number format&#x27;s own rounding error, not be exact.">The noise rule for floating-point workloads</a></div>
+    </div>
+</section>
+
+<section class="slide" id="slide-01">
+    <div class="slide-number">01</div>
+    <h2>The Traffic Each Kind of Parallelism Creates</h2>
+    <p>Large-model training splits work along several axes at once, and each axis puts a different kind of data on a different kind of link. What a compute-in-transit module could act on depends on which traffic it sees.</p>
+    <div class="table-wrap">
+    <table>
+        <tr><th>Parallelism</th><th>What crosses the link</th><th>How often</th><th>Typical link</th></tr>
+        <tr><td><strong>Data parallel (DDP)</strong></td><td>Gradients, summed across replicas (all-reduce)</td><td>Every optimiser step</td><td>InfiniBand or Ethernet between nodes</td></tr>
+        <tr><td><strong>FSDP / ZeRO-3</strong></td><td>Weight shards (all-gather) before use; gradients (reduce-scatter) after the backward pass</td><td>Every layer, forward and backward, every step</td><td>NVLink in a node, InfiniBand between nodes</td></tr>
+        <tr><td><strong>Tensor parallel</strong></td><td>Activations and their gradients, combined by all-reduce</td><td>Every layer, forward and backward</td><td>NVLink, inside one node</td></tr>
+        <tr><td><strong>Pipeline parallel</strong></td><td>Activations forward, activation gradients backward</td><td>At each stage boundary, per micro-batch</td><td>InfiniBand between nodes</td></tr>
+        <tr><td><strong>Sequence / context parallel</strong> (incl. ring attention)</td><td>Key and value blocks passed round a ring of devices</td><td>Every attention layer</td><td>NVLink or InfiniBand</td></tr>
+        <tr><td><strong>Expert parallel (MoE)</strong></td><td>Tokens to their experts and back (all-to-all)</td><td>Every MoE layer, twice</td><td>NVLink or InfiniBand</td></tr>
+    </table>
+    </div>
+    <ul>
+        <li><strong>The bulk transfer is the data-parallel sync:</strong> once per step, one model-sized buffer per worker (<a href="#slide-02">slide 02</a>). It is also the only traffic that can cross a data centre boundary without stalling every layer, which is where low-communication methods act (<a href="#slide-06">slide 06</a>).</li>
+        <li><strong>Per-layer traffic is latency-critical:</strong> tensor-parallel and ring-attention exchanges sit on the critical path of each layer, so anything inserted on those links must add little delay.</li>
+        <li>Sources: Megatron-LM for tensor parallelism (Shoeybi et al., <a href="https://arxiv.org/abs/1909.08053">arXiv:1909.08053</a>); ZeRO (Rajbhandari et al., <a href="https://arxiv.org/abs/1910.02054">arXiv:1910.02054</a>) and PyTorch FSDP (Zhao et al., <a href="https://arxiv.org/abs/2304.11277">arXiv:2304.11277</a>); GPipe (Huang et al., <a href="https://arxiv.org/abs/1811.06965">arXiv:1811.06965</a>); ring attention (Liu, Zaharia and Abbeel, <a href="https://arxiv.org/abs/2310.01889">arXiv:2310.01889</a>); GShard for MoE all-to-all (Lepikhin et al., <a href="https://arxiv.org/abs/2006.16668">arXiv:2006.16668</a>).</li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-02">
+    <div class="slide-number">02</div>
+    <h2>How Big Is a Gradient Sync?</h2>
+    <p>A BF16 gradient is 2 bytes per parameter. A ring all-reduce (<a href="#slide-03">slide 03</a>) makes each worker send a little under twice that:</p>
+    <div class="table-wrap"><table>
+<thead><tr><th>Model</th><th>Parameters</th><th>BF16 gradient (GB)</th><th>Ring all-reduce bytes per worker, 8 workers (GB)</th><th>64 workers (GB)</th></tr></thead>
+<tbody>
+<tr><td>Llama-3-8B</td><td>8,029,995,008</td><td>16.06</td><td>28.10</td><td>31.62</td></tr>
+<tr><td>Llama-3-70B</td><td>70,552,387,584</td><td>141.10</td><td>246.93</td><td>277.80</td></tr>
+</tbody></table></div>
+    <p class="src">Source: <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Compute_in_Transit/blob/main/analysis/results.md">results.md</a>, section &ldquo;3. Training&rdquo;</p>
+    <div class="tier-visual">
+        <div class="tier-bar"><span class="tier-label">70B, 64 w.</span><div class="tier-fill" style="width:100%; background: var(--accent-dim); color: var(--text-primary);">277.80 GB per worker</div></div>
+        <div class="tier-bar"><span class="tier-label">70B grad</span><div class="tier-fill" style="width:50.8%; background: var(--accent-dim); color: var(--text-primary);">141.10 GB</div></div>
+        <div class="tier-bar"><span class="tier-label">8B, 64 w.</span><div class="tier-fill" style="width:11.4%; min-width: 9rem; background: var(--accent-dim); color: var(--text-primary);">31.62 GB</div></div>
+        <div class="tier-bar"><span class="tier-label">8B grad</span><div class="tier-fill" style="width:5.8%; min-width: 9rem; background: var(--accent-dim); color: var(--text-primary);">16.06 GB</div></div>
+        <div class="tier-bar"><span class="tier-label">8B KV, 2k</span><div class="tier-fill" style="width:0.1%; min-width: 9rem; background: var(--bg-code); color: var(--text-secondary);">268.4 MB (inference)</div></div>
+    </div>
+    <ul>
+        <li><strong>Training syncs are the largest movements in LLM work.</strong> A Llama-3-70B BF16 update is 141.10 GB, against 268.4 MB for a 2,048-token Llama-3-8B KV hand-off in inference (results.md section 6; deck 03 covers inference). Bar widths are linear; the two smallest bars are widened so their labels fit.</li>
+        <li><strong>The gradient is the same size as the weights</strong>, so the per-step volume does not shrink with batch size: larger batches only make the sync rarer per token.</li>
+        <li><strong>FSDP moves weights too.</strong> Gathering BF16 weights forward and backward, then reduce-scattering gradients, costs about 1.5 times the data-parallel volume by ZeRO's own count (Rajbhandari et al., <a href="https://arxiv.org/abs/1910.02054">arXiv:1910.02054</a>), in exchange for memory.</li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-03">
+    <div class="slide-number">03</div>
+    <h2>Ring All-Reduce Arithmetic</h2>
+    <p>N workers each hold a buffer of B bytes and all need the sum. Split each buffer into N chunks and arrange the workers in a ring.</p>
+    <div class="canvas-wrap">
+        <svg viewBox="0 0 760 300" width="760" height="300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four workers in a ring, each sending one chunk to its neighbour per step: N-1 steps of reduce-scatter then N-1 steps of all-gather">
+            <style>
+                .wk { fill: #2b2520; stroke: #6cb6c4; stroke-width: 1.5; }
+                .ch { stroke: #3a322b; stroke-width: 1; }
+                .c0 { fill: #6cb6c4; } .c1 { fill: #e3b174; } .c2 { fill: #de805a; } .c3 { fill: #d7bbdf; }
+                .ar { stroke: #6cb6c4; stroke-width: 1.6; fill: none; }
+                .t  { fill: #efe8dc; font-family: 'Geist Mono', monospace; font-size: 12px; }
+                .d  { fill: #a2978b; font-family: 'Geist Mono', monospace; font-size: 11px; }
+                .m  { fill: #6cb6c4; font-family: 'Geist Mono', monospace; font-size: 12px; }
+            </style>
+            <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#6cb6c4"/></marker></defs>
+            <!-- four workers on a square -->
+            <rect x="60" y="30" width="110" height="56" rx="6" class="wk"/><text x="72" y="50" class="t">worker 0</text>
+            <rect x="72" y="60" width="20" height="14" class="ch c0"/><rect x="92" y="60" width="20" height="14" class="ch c1"/><rect x="112" y="60" width="20" height="14" class="ch c2"/><rect x="132" y="60" width="20" height="14" class="ch c3"/>
+            <rect x="300" y="30" width="110" height="56" rx="6" class="wk"/><text x="312" y="50" class="t">worker 1</text>
+            <rect x="312" y="60" width="20" height="14" class="ch c0"/><rect x="332" y="60" width="20" height="14" class="ch c1"/><rect x="352" y="60" width="20" height="14" class="ch c2"/><rect x="372" y="60" width="20" height="14" class="ch c3"/>
+            <rect x="300" y="200" width="110" height="56" rx="6" class="wk"/><text x="312" y="220" class="t">worker 2</text>
+            <rect x="312" y="230" width="20" height="14" class="ch c0"/><rect x="332" y="230" width="20" height="14" class="ch c1"/><rect x="352" y="230" width="20" height="14" class="ch c2"/><rect x="372" y="230" width="20" height="14" class="ch c3"/>
+            <rect x="60" y="200" width="110" height="56" rx="6" class="wk"/><text x="72" y="220" class="t">worker 3</text>
+            <rect x="72" y="230" width="20" height="14" class="ch c0"/><rect x="92" y="230" width="20" height="14" class="ch c1"/><rect x="112" y="230" width="20" height="14" class="ch c2"/><rect x="132" y="230" width="20" height="14" class="ch c3"/>
+            <line x1="175" y1="58" x2="295" y2="58" class="ar" marker-end="url(#ah)"/>
+            <line x1="355" y1="91" x2="355" y2="195" class="ar" marker-end="url(#ah)"/>
+            <line x1="295" y1="228" x2="175" y2="228" class="ar" marker-end="url(#ah)"/>
+            <line x1="115" y1="195" x2="115" y2="91" class="ar" marker-end="url(#ah)"/>
+            <text x="190" y="50" class="d">one chunk, B/N</text>
+            <text x="164" y="146" class="d">each step, every link</text>
+            <text x="164" y="161" class="d">carries one chunk</text>
+            <!-- phase description -->
+            <text x="450" y="50" class="m">1. reduce-scatter</text>
+            <text x="450" y="68" class="d">N-1 steps: receive a chunk, add your</text>
+            <text x="450" y="83" class="d">own, pass the sum on. Each worker</text>
+            <text x="450" y="98" class="d">ends owning one fully summed chunk.</text>
+            <text x="450" y="135" class="m">2. all-gather</text>
+            <text x="450" y="153" class="d">N-1 steps: pass the finished chunks</text>
+            <text x="450" y="168" class="d">round until everyone has all N.</text>
+            <text x="450" y="210" class="m">per worker sent:</text>
+            <text x="450" y="230" class="t">2 (N-1) &middot; B/N = 2(N-1)/N &middot; B</text>
+            <text x="450" y="250" class="d">N = 8: 1.75 B;  N = 64: 1.97 B</text>
+            <text x="450" y="268" class="d">adds: (N-1)/N &middot; B/2 per worker (BF16)</text>
+        </svg>
+    </div>
+    <ul>
+        <li><strong>Bandwidth-optimal:</strong> the bytes each worker sends approach 2B as N grows, independent of N, so adding workers does not add traffic per link. That is why results.md's 8- and 64-worker columns differ by only about an eighth (28.10 against 31.62 GB for Llama-3-8B).</li>
+        <li><strong>The cost is latency:</strong> 2(N&minus;1) sequential steps, each paying the link's latency. Collective libraries switch to tree or hierarchical schemes for small messages and large N; the byte count of the bulk sync stays near 2B.</li>
+        <li><strong>The arithmetic is tiny.</strong> The reduce-scatter adds each value once per hop: one add per BF16 value, 0.5 operations per byte (results.md section 2). The work is moving the bytes, not summing them.</li>
+        <li><strong>Where a link module sits matters:</strong> in a ring, each link carries a partial sum from one neighbour, so a module on that link sees one stream. It can transform or compress that stream; it cannot sum workers whose data never pass through it (<a href="#slide-05">slide 05</a>).</li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-04">
+    <div class="slide-number">04</div>
+    <h2>Interactive: Where Links Bind</h2>
+    <p>Time to move one model-sized BF16 update once over one link: latency + bytes / bandwidth, with the link presets of <a href="https://github.com/BrendanJamesLynskey/Disaggregated_Inference_Sim">Disaggregated_Inference_Sim</a> (milliseconds):</p>
+    <div class="table-wrap"><table>
+<thead><tr><th>Model</th><th>Link</th><th>GB/s</th><th>none</th><th>FP8 (2x)</th><th>2-bit (8x)</th><th>DeMo reported (85x)</th></tr></thead>
+<tbody>
+<tr><td>Llama-3-8B</td><td>NVLink 4 (one direction)</td><td>450.0</td><td>35.7</td><td>17.8</td><td>4.5</td><td>0.4</td></tr>
+<tr><td>Llama-3-8B</td><td>InfiniBand NDR 400G</td><td>50.0</td><td>321.2</td><td>160.6</td><td>40.2</td><td>3.8</td></tr>
+<tr><td>Llama-3-8B</td><td>100 GbE</td><td>12.5</td><td>1,284.8</td><td>642.4</td><td>160.6</td><td>15.1</td></tr>
+<tr><td>Llama-3-8B</td><td>25 GbE</td><td>3.1</td><td>5,139.2</td><td>2,569.6</td><td>642.4</td><td>60.5</td></tr>
+<tr><td>Llama-3-70B</td><td>NVLink 4 (one direction)</td><td>450.0</td><td>313.6</td><td>156.8</td><td>39.2</td><td>3.7</td></tr>
+<tr><td>Llama-3-70B</td><td>InfiniBand NDR 400G</td><td>50.0</td><td>2,822.1</td><td>1,411.1</td><td>352.8</td><td>33.2</td></tr>
+<tr><td>Llama-3-70B</td><td>100 GbE</td><td>12.5</td><td>11,288.4</td><td>5,644.2</td><td>1,411.1</td><td>132.8</td></tr>
+<tr><td>Llama-3-70B</td><td>25 GbE</td><td>3.1</td><td>45,153.5</td><td>22,576.8</td><td>5,644.2</td><td>531.2</td></tr>
+</tbody></table></div>
+    <p class="src">Source: <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Compute_in_Transit/blob/main/analysis/results.md">results.md</a>, section &ldquo;3. Training&rdquo;. 2x = BF16 to FP8; 8x = BF16 to 2-bit (MuLoCo's setting); 85x = DeMo's reported reduction. The ratios are the papers' figures, used only to size transfers.</p>
+    <div class="control-panel">
+        <div class="sim-grid">
+            <div class="control-row"><label for="lk-model">Model</label><select id="lk-model"><option value="8b">Llama-3-8B</option><option value="70b" selected>Llama-3-70B</option></select></div>
+            <div class="control-row"><label for="lk-link">Link</label><select id="lk-link"><option value="nvlink">NVLink 4, 450 GB/s</option><option value="ib">InfiniBand NDR, 50 GB/s</option><option value="e100" selected>100 GbE, 12.5 GB/s</option><option value="e25">25 GbE, 3.125 GB/s</option></select></div>
+            <div class="control-row"><label for="lk-ratio">Compression</label><select id="lk-ratio"><option value="1" selected>none (1x)</option><option value="2">FP8 (2x)</option><option value="8">2-bit (8x)</option><option value="85">DeMo reported (85x)</option><option value="custom">custom&hellip;</option></select></div>
+            <div class="control-row"><label for="lk-custom">Custom ratio</label><input type="number" id="lk-custom" min="1" max="10000" step="any" value="16" disabled></div>
+            <div class="control-row"><label for="lk-n">Ring workers N</label><select id="lk-n"><option value="8" selected>8</option><option value="64">64</option></select></div>
+        </div>
+        <div class="metric-grid">
+            <div class="metric"><div class="metric-label">BF16 update</div><div class="metric-value" id="lk-bytes">&mdash;</div></div>
+            <div class="metric"><div class="metric-label">On the wire</div><div class="metric-value" id="lk-wire">&mdash;</div></div>
+            <div class="metric"><div class="metric-label">Move once</div><div class="metric-value" id="lk-time">&mdash;</div></div>
+            <div class="metric"><div class="metric-label">Ring, per worker (bandwidth term)</div><div class="metric-value" id="lk-ring">&mdash;</div></div>
+        </div>
+        <div class="tier-visual" id="lk-bars" style="margin-bottom:0;"></div>
+        <p id="lk-note" style="font-size:0.85rem; margin-top:0.6rem;"></p>
+    </div>
+    <script>
+    (function(){
+        const $ = id => document.getElementById(id);
+        const PARAMS = { '8b': 8029995008, '70b': 70552387584 };
+        const NAMES = { '8b': 'Llama-3-8B', '70b': 'Llama-3-70B' };
+        const LINKS = {   // bandwidth (bytes/s) and latency (s), as in disagg_sim.hardware
+            nvlink: { name: 'NVLink 4', bw: 450e9,   lat: 5e-6 },
+            ib:     { name: 'IB NDR',   bw: 50e9,    lat: 10e-6 },
+            e100:   { name: '100 GbE',  bw: 12.5e9,  lat: 20e-6 },
+            e25:    { name: '25 GbE',   bw: 3.125e9, lat: 20e-6 },
+        };
+        const fmtMs = s => (s * 1e3).toLocaleString('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' ms';
+        const fmtT = s => s >= 1 ? s.toFixed(2) + ' s' : fmtMs(s);
+        const fmtB = b => b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(1) + ' MB';
+        function ratio() {
+            const v = $('lk-ratio').value; $('lk-custom').disabled = v !== 'custom';
+            const r = v === 'custom' ? +$('lk-custom').value : +v;
+            return isFinite(r) && r >= 1 ? r : 1;
+        }
+        function rec() {
+            const m = $('lk-model').value, L = LINKS[$('lk-link').value], r = ratio(), N = +$('lk-n').value;
+            const bytes = 2 * PARAMS[m], wire = bytes / r, t = L.lat + wire / L.bw;
+            const ringBytes = 2 * (N - 1) / N * wire;
+            $('lk-bytes').textContent = fmtB(bytes);
+            $('lk-wire').textContent = fmtB(wire);
+            $('lk-time').textContent = fmtT(t);
+            $('lk-ring').textContent = fmtT(ringBytes / L.bw);
+            // bars: every link, same model and ratio, log scale from 0.1 ms to 100 s
+            const lo = Math.log10(1e-4), hi = Math.log10(100);
+            $('lk-bars').innerHTML = Object.entries(LINKS).map(([k, l]) => {
+                const tt = l.lat + wire / l.bw;
+                const w = Math.max(2, Math.min(100, (Math.log10(tt) - lo) / (hi - lo) * 100));
+                const sel = l === L;
+                return `<div class="tier-bar"><span class="tier-label">${l.name}</span><div class="tier-fill" style="width:${w.toFixed(1)}%; min-width:6rem; background:${sel ? 'var(--accent-dim)' : 'var(--bg-code)'}; color:${sel ? 'var(--text-primary)' : 'var(--text-secondary)'}; border:1px solid ${sel ? 'var(--accent)' : 'var(--border)'};">${fmtT(tt)}</div></div>`;
+            }).join('');
+            $('lk-note').innerHTML = `${NAMES[m]}, ${r === 1 ? 'uncompressed' : r + 'x compression'}: ` +
+                `${fmtB(bytes)} becomes ${fmtB(wire)} on the wire. Move once = latency + bytes / bandwidth, the formula of results.md section 3. ` +
+                `The ring figure is 2(N&minus;1)/N &times; the compressed buffer over the same link, bandwidth term only (its 2(N&minus;1) latencies, and any time to compress, are ignored). Bars use a log scale.`;
+            window.lkState = { seconds: t, ringSeconds: ringBytes / L.bw, wire };
+        }
+        ['lk-model', 'lk-link', 'lk-ratio', 'lk-custom', 'lk-n'].forEach(id => $(id).addEventListener('input', rec));
+        rec();
+    })();
+    </script>
+    <ul>
+        <li><strong>Inside a node the sync is short:</strong> 35.7 ms for Llama-3-8B and 313.6 ms for Llama-3-70B on NVLink 4. Between nodes on InfiniBand NDR a 70B update takes 2,822.1 ms, which training frameworks hide by overlapping it with the backward pass.</li>
+        <li><strong>Across data centres it binds.</strong> Over a 100 GbE link a Llama-3-70B update takes 11.3 s uncompressed. This is the traffic DiLoCo-family methods shrink (<a href="#slide-06">slide 06</a>), and the place compression in transit would act.</li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-05">
+    <div class="slide-number">05</div>
+    <h2>In-Network Aggregation</h2>
+    <p>If the network itself sums the workers' updates, each worker sends its gradient once and receives the sum once, instead of the 2(N&minus;1)/N &middot; B of a ring, and the switch does the adds.</p>
+    <div class="diagram-flow">
+        <span class="diagram-box">worker 0 &rarr; slice of g<sub>0</sub></span>
+        <span class="diagram-box">worker 1 &rarr; slice of g<sub>1</sub></span>
+        <span class="diagram-box dim">&hellip;</span>
+        <span class="diagram-arrow">&rarr;</span>
+        <span class="diagram-box accent">switch: &Sigma; in a slot of switch memory</span>
+        <span class="diagram-arrow">&rarr;</span>
+        <span class="diagram-box">sum multicast back to every worker</span>
+    </div>
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>SwitchML (NSDI 2021)</h4>
+            <ul>
+                <li>Programmable switches (Barefoot Tofino, programmed in P4) aggregate model updates from many workers in the network (Sapio et al., &ldquo;Scaling Distributed Machine Learning with In-Network Aggregation&rdquo;, <a href="https://arxiv.org/abs/1903.06701">arXiv:1903.06701</a>).</li>
+                <li>Reports up to <strong>5.5&times; training speed-up</strong> on real-world benchmark models.</li>
+                <li>The switch pipeline does <strong>integer arithmetic</strong>, so workers convert floating-point updates to integers (with a scaling factor) before sending.</li>
+                <li><strong>Limited switch memory and per-packet processing:</strong> the switch holds a small pool of aggregation slots that are reused as the update streams through, rather than the whole gradient.</li>
+            </ul>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>NVIDIA SHARP</h4>
+            <ul>
+                <li>Performs reductions inside InfiniBand switches, offloading collective operations from the hosts to the network.</li>
+                <li>Same principle as SwitchML, in a fabric product rather than a research prototype.</li>
+            </ul>
+            <h4 style="margin-top:0.9rem;">The budget check</h4>
+            <ul>
+                <li>Summing two BF16 streams is <strong>0.5 operations per byte</strong> (results.md section 2).</li>
+                <li>A QSFP56 module's budget is <strong>0.40 to 3.96</strong> operations per byte (section 1, on this series' reading of Kundu et al.'s &ldquo;tens of GFLOPs&rdquo; per link, <a href="https://arxiv.org/abs/2608.21536">arXiv:2608.21536</a>): it fits at the high end, not the low.</li>
+            </ul>
+        </div>
+    </div>
+    <div class="callout">
+        <div class="callout-label">The point for this series</div>
+        <p>Summing needs flows from many workers to <strong>meet</strong>. A pluggable module sees one link, one stream; the arithmetic would fit, but the operands are never in the same place. Aggregation belongs in a switch. What a link module could do to the data-parallel sync is transform or compress the single stream it carries, which is the rest of this deck.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-06">
+    <div class="slide-number">06</div>
+    <h2>Low-Communication Training: the DiLoCo Family</h2>
+    <p>Instead of syncing every step, each worker (or island of accelerators) takes many local optimiser steps, then the workers exchange the <strong>pseudo-gradient</strong>, the change in their parameters, and apply one outer optimiser step to it.</p>
+    <div class="code-block">
+        <div class="code-header">DiLoCo, one outer step (after Douillard et al., Algorithm 1)</div>
+<pre><code><span class="kw">for</span> each worker i, <span class="kw">in parallel</span>:
+    &theta;<sub>i</sub> &larr; &theta;                        <span class="cm"># start from the shared parameters</span>
+    <span class="kw">repeat</span> H times: &theta;<sub>i</sub> &larr; <span class="fn">AdamW</span>(&theta;<sub>i</sub>, local data)   <span class="cm"># inner steps, no communication</span>
+    &Delta;<sub>i</sub> &larr; &theta; &minus; &theta;<sub>i</sub>                    <span class="cm"># pseudo-gradient: one model-sized buffer</span>
+&Delta; &larr; <span class="fn">all_reduce_mean</span>(&Delta;<sub>i</sub>)               <span class="cm"># the only sync: once per H steps</span>
+&theta; &larr; <span class="fn">Nesterov</span>(&theta;, &Delta;)                  <span class="cm"># outer step</span></code></pre>
+    </div>
+    <div class="table-wrap">
+    <table>
+        <tr><th>Method</th><th>What it changes</th><th>Reported result</th></tr>
+        <tr><td><strong>DiLoCo</strong> (Douillard et al., 2023, <a href="https://arxiv.org/abs/2311.08105">arXiv:2311.08105</a>)</td><td>Inner AdamW, outer Nesterov momentum; sync every H inner steps</td><td>On C4 with 8 workers, matches fully synchronous training while communicating <strong>500&times; less</strong></td></tr>
+        <tr><td><strong>Streaming DiLoCo</strong> (Google DeepMind, Jan 2025, <a href="https://arxiv.org/abs/2501.18512">arXiv:2501.18512</a>)</td><td>Syncs subsets of parameters in sequence, overlaps communication with training, quantises what is exchanged</td><td>Reduces required bandwidth by <strong>two orders of magnitude</strong> at similar quality</td></tr>
+        <tr><td><strong>MuLoCo</strong> (May 2025, <a href="https://arxiv.org/abs/2505.23725">arXiv:2505.23725</a>)</td><td>Muon as the inner optimiser, plus error feedback</td><td>Delta compressed to <strong>2 bits</strong> with next to no degradation; communicates <strong>8&times; less</strong> than DiLoCo</td></tr>
+        <tr><td><strong>SparseLoCo</strong> (Aug 2025, <a href="https://arxiv.org/abs/2508.15706">arXiv:2508.15706</a>)</td><td>Top-k sparsification of the pseudo-gradient (97&ndash;99% sparsity) with 2-bit quantisation</td><td>Lower final loss than dense DiLoCo, on models from 178M to 2B parameters</td></tr>
+    </table>
+    </div>
+    <ul>
+        <li><strong>The sync is still one model-sized buffer</strong>, just rarer and smaller. The 2x, 8x and 85x columns of <a href="#slide-04">slide 04</a> size it: a 2-bit Llama-3-70B update over 100 GbE is 1,411.1 ms rather than 11,288.4 ms.</li>
+        <li><strong>Every member of the family compresses at the endpoint</strong>, on the accelerator that holds the optimiser state. Error feedback, in particular, needs memory of what was not sent: state that a link module would have to hold per parameter if it did the compressing.</li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-07">
+    <div class="slide-number">07</div>
+    <h2>Frequency-Domain Gradient Compression</h2>
+    <p>Sparsification usually keeps the largest gradient entries in their own domain. Wang et al. asked whether a transform first would keep more of the information at the same compression ratio (&ldquo;FFT-based Gradient Sparsification for the Distributed Training of Deep Neural Networks&rdquo;, HPDC 2020, <a href="https://arxiv.org/abs/1811.08596">arXiv:1811.08596</a>).</p>
+    <div class="diagram-flow">
+        <span class="diagram-box">gradient, flattened to a 1-D signal</span>
+        <span class="diagram-arrow">&rarr;</span>
+        <span class="diagram-box accent">FFT</span>
+        <span class="diagram-arrow">&rarr;</span>
+        <span class="diagram-box">drop near-zero coefficients (threshold)</span>
+        <span class="diagram-arrow">&rarr;</span>
+        <span class="diagram-box">range-based float encoding of the rest</span>
+        <span class="diagram-arrow">&rarr;</span>
+        <span class="diagram-box dim">send; inverse FFT at the receiver</span>
+    </div>
+    <ul>
+        <li><strong>The premise:</strong> the gradient's energy concentrates in fewer frequency coefficients than spatial entries, so the same number of kept values carries more of the signal.</li>
+        <li><strong>Quantisation of what is kept</strong> uses a range-based floating-point representation, fitted to the span of the surviving coefficients, to cut the bits per value further.</li>
+        <li><strong>Convergence:</strong> the authors prove convergence with a diminishing threshold, so the compression error vanishes as training proceeds.</li>
+        <li><strong>Why it matters here:</strong> the expensive step is a transform. A photonic module's published operation set includes the FFT; selection by threshold does not (it needs comparisons), which is the same split <a href="#slide-09">slide 09</a> meets in DeMo.</li>
+    </ul>
+    <div class="callout">
+        <div class="callout-label">What a transform does not guarantee</div>
+        <p>Whether frequency coefficients are sparser than the raw entries depends on the tensor. Flattening a weight matrix's gradient into one long signal imposes an ordering the network does not care about; results.md section 5 shows that on white noise or sparse spikes a transform concentrates nothing. The case for frequency-domain compression is empirical, tensor by tensor.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-08">
+    <div class="slide-number">08</div>
+    <h2>DeMo: Decoupled Momentum and the DCT</h2>
+    <p>DeMo (Peng, Quesnelle and Kingma; the later version adds Chen, Su and Liu; ICLR 2026; <a href="https://arxiv.org/abs/2411.19870">arXiv:2411.19870</a>) drops the per-step all-reduce of full gradients. Each worker's momentum evolves locally, and only its fast-moving components are shared.</p>
+    <div class="code-block">
+        <div class="code-header">DeMo, one step on worker i (simplified from the paper's algorithm)</div>
+<pre><code>m<sub>i</sub> &larr; &beta; m<sub>i</sub> + g<sub>i</sub>                    <span class="cm"># local momentum, never all-reduced</span>
+C &larr; <span class="fn">DCT</span>(<span class="fn">chunks</span>(m<sub>i</sub>))                  <span class="cm"># transform each fixed-size chunk</span>
+q<sub>i</sub> &larr; <span class="fn">top_k</span>(C)                       <span class="cm"># keep the k largest per chunk: values + indices</span>
+m<sub>i</sub> &larr; m<sub>i</sub> &minus; <span class="fn">IDCT</span>(q<sub>i</sub>)                  <span class="cm"># remove what was sent: momentum is the error feedback</span>
+Q &larr; <span class="fn">all_gather</span>(q<sub>i</sub>)                    <span class="cm"># the only communication: small</span>
+&theta; &larr; &theta; &minus; &eta; &middot; <span class="fn">IDCT</span>(Q)                   <span class="cm"># same update on every worker (see the paper for its exact form)</span></code></pre>
+    </div>
+    <ul>
+        <li><strong>The momentum buffer acts as error feedback:</strong> what was not sent stays in m<sub>i</sub> and accumulates until it is large enough to be picked by top-k.</li>
+        <li><strong>Reported:</strong> up to <strong>85&times; less data per GPU</strong> than AdamW with DDP, at comparable loss and accuracy, for 300M and 1B-parameter models.</li>
+        <li><strong>A DiLoCo-style variant</strong> (&ldquo;Distributed Low-Communication Training with Decoupled Momentum Optimization&rdquo;, NeurIPS 2025, <a href="https://neurips.cc/virtual/2025/132792">neurips.cc</a>) decomposes Nesterov momentum into high- and low-frequency components with the DCT and synchronises only the high-frequency components every H steps, reporting up to <strong>16&times; less communication</strong> than DiLoCo.</li>
+    </ul>
+    <div class="callout">
+        <div class="callout-label">Why DeMo is this series' test case</div>
+        <p>Its compressor is a transform followed by a selection, applied to a stream on its way to the network. The transform is in a photonic module's operation set; the selection is not. That gap is the subject of the next three slides.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-09">
+    <div class="slide-number">09</div>
+    <h2>Mapping DeMo onto a Photonic Link Module</h2>
+    <p>The module's published operation set is FFT, NTT, modular arithmetic and MAC (Kundu et al., <a href="https://arxiv.org/abs/2608.21536">arXiv:2608.21536</a>). Step by step:</p>
+    <div class="table-wrap">
+    <table>
+        <tr><th>DeMo step</th><th>In the set?</th><th>Substitute</th></tr>
+        <tr><td>Chunk the momentum</td><td>Data layout only</td><td>&mdash;</td></tr>
+        <tr><td>DCT of each chunk</td><td><span class="badge ok">yes</span> (a real FFT variant)</td><td>&mdash;</td></tr>
+        <tr><td>Top-k selection</td><td><span class="badge bad">no</span>: needs comparisons</td><td><strong>A fixed frequency band</strong>: a gather, no arithmetic; no indices to send</td></tr>
+        <tr><td>Subtract what was sent from the momentum</td><td>Needs the optimiser state</td><td>Stays on the GPU, which must know which band was sent (with a fixed band, it always does)</td></tr>
+    </table>
+    </div>
+    <div class="table-wrap"><table>
+<thead><tr><th>Kernel</th><th>Transform / byte</th><th>Other / byte</th><th>In set</th><th>Fits low budget (transform charged)</th><th>Fits high budget (transform charged)</th><th>Fits if transform free (low)</th></tr></thead>
+<tbody>
+<tr><td>2-D DCT of 16x16 chunks, fixed band</td><td>10.00</td><td>0.00</td><td>yes</td><td>no</td><td>no</td><td>yes</td></tr>
+<tr><td>2-D DCT of 64x64 chunks, fixed band</td><td>15.00</td><td>0.00</td><td>yes</td><td>no</td><td>no</td><td>yes</td></tr>
+<tr><td>2-D DCT of 64x64 chunks + top-k (DeMo as published)</td><td>15.00</td><td>1.00</td><td>no</td><td>no</td><td>no</td><td>no</td></tr>
+</tbody></table></div>
+    <p class="src">Source: <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Compute_in_Transit/blob/main/analysis/results.md">results.md</a>, section &ldquo;2. Work per byte&rdquo;. Top-k is costed at about 2 comparisons per value (illustrative).</p>
+    <p>The DCT costs 10 to 15 FLOPs per BF16 byte if charged against a budget of 0.40 to 3.96, so it fits <strong>only if the optics does the transform without charge</strong>. If it does, the fixed band adds no arithmetic and fits; top-k does not, being outside the set.</p>
+    <div class="canvas-wrap">
+        <svg viewBox="0 0 700 220" width="700" height="220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two 8 by 8 grids of DCT coefficients: a fixed low-frequency block in the corner, and top-k picks scattered wherever the largest coefficients happen to be">
+            <style>
+                .g  { fill: #2b2520; stroke: #3a322b; stroke-width: 1; }
+                .k  { fill: #6cb6c4; stroke: #3a322b; stroke-width: 1; }
+                .t  { fill: #efe8dc; font-family: 'Geist Mono', monospace; font-size: 12px; }
+                .d  { fill: #a2978b; font-family: 'Geist Mono', monospace; font-size: 11px; }
+            </style>
+            <g id="fb"></g><g id="tk"></g>
+            <text x="40" y="200" class="t">fixed band: same 4 low-frequency cells</text>
+            <text x="40" y="215" class="d">every chunk; nothing to compare, no indices</text>
+            <text x="380" y="200" class="t">top-k: the 4 largest, wherever they are</text>
+            <text x="380" y="215" class="d">illustrative pattern; differs chunk by chunk</text>
+        </svg>
+    </div>
+    <script>
+    (function(){
+        const ns = 'http://www.w3.org/2000/svg';
+        function grid(id, x0, keep) {
+            const g = document.getElementById(id);
+            for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+                const e = document.createElementNS(ns, 'rect');
+                e.setAttribute('x', x0 + c * 20); e.setAttribute('y', 20 + r * 20); e.setAttribute('width', 20); e.setAttribute('height', 20);
+                e.setAttribute('class', keep.some(([a, b]) => a === r && b === c) ? 'k' : 'g'); g.appendChild(e);
+            }
+        }
+        grid('fb', 100, [[0, 0], [0, 1], [1, 0], [1, 1]]);
+        grid('tk', 440, [[0, 0], [2, 5], [5, 1], [6, 6]]);
+    })();
+    </script>
+    <div class="table-wrap"><table>
+<thead><tr><th>Signal</th><th>Kept fraction</th><th>Top-k energy</th><th>Fixed band energy</th></tr></thead>
+<tbody>
+<tr><td>white noise</td><td>0.0625</td><td>0.325</td><td>0.062</td></tr>
+<tr><td>2-D random walk (smooth)</td><td>0.0625</td><td>0.995</td><td>0.957</td></tr>
+<tr><td>sparse spikes (1% non-zero)</td><td>0.0625</td><td>0.320</td><td>0.062</td></tr>
+</tbody></table></div>
+    <p class="src">Source: <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Compute_in_Transit/blob/main/analysis/results.md">results.md</a>, section &ldquo;5. A fixed frequency band against top-k&rdquo;: share of each 64 &times; 64 chunk's energy kept after a 2-D DCT, keeping 1/16 of the coefficients. Synthetic signals, illustrative.</p>
+    <ul>
+        <li><strong>A fixed band works only when energy sits at low frequencies</strong> (the smooth case, 0.957 against 0.995). On noise or spikes it keeps about its own share of the energy, 0.062, far below top-k's 0.325 and 0.320.</li>
+        <li>Whether real momentum looks like the smooth case or the noisy one is not known from synthetic signals. The next slide plans the measurement.</li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-10">
+    <div class="slide-number">10</div>
+    <h2>The Fixed-Band Experiment (Planned)</h2>
+    <div class="callout">
+        <div class="callout-label">Status</div>
+        <p>This experiment is <strong>planned, not run</strong>. No results are shown, and none of the slides above depends on its outcome.</p>
+    </div>
+    <p>Train a small GPT, tens of millions of parameters (nanoGPT-style, on a small text corpus), four ways, at the same keep fraction in arms (b) to (d):</p>
+    <div class="table-wrap">
+    <table>
+        <tr><th>Arm</th><th>Optimiser and compression</th><th>Question it answers</th></tr>
+        <tr><td>(a)</td><td>AdamW with DDP, uncompressed</td><td>The baseline: loss with full communication</td></tr>
+        <tr><td>(b)</td><td>DeMo as published: DCT + top-k</td><td>Reproduces the reference compressor at this scale</td></tr>
+        <tr><td>(c)</td><td>DeMo with a <strong>fixed low-frequency band</strong> in place of top-k</td><td>Does a comparison-free selection keep the convergence?</td></tr>
+        <tr><td>(d)</td><td>Fixed band with <strong>emulated optics</strong>: additive noise at a chosen ENOB, and the transform restricted to a native size</td><td>Does it survive analogue precision and a fixed transform length?</td></tr>
+    </table>
+    </div>
+    <ul>
+        <li><strong>Metric:</strong> validation loss against bytes communicated, so arms with different compression are compared at equal traffic, not equal steps.</li>
+        <li><strong>Sweeps:</strong> chunk size (for example 16 and 64, the two sizes costed in results.md section 2); keep fraction (for example 1/16, as in section 5); ENOB in arm (d), with noise added by the rule of the sister series (<a href="https://brendanjameslynskey.github.io/LLM_Hub_Fourier_Optics_Inference/#g-floatenob">the noise rule for floating-point workloads</a>).</li>
+        <li><strong>Diagnostics:</strong> the share of each chunk's momentum energy that falls in the fixed band, logged during training, which ties the outcome back to section 5's synthetic cases.</li>
+    </ul>
+    <h3>Which band?</h3>
+    <p>Low frequencies within a chunk are the obvious choice, and section 5 shows they work for smooth signals. But DeMo's own premise is that the components worth synchronising are the <em>fast-moving</em> ones, and the NeurIPS 2025 variant synchronises the <strong>high</strong>-frequency components of momentum (<a href="#slide-08">slide 08</a>). Is momentum energy within a chunk concentrated at low frequencies at all? And if what matters is high-frequency content, does a fixed high band do as well as top-k? The experiment should test a low band, a high band and top-k side by side rather than assume the answer.</p>
+</section>
+
+<section class="slide" id="slide-11">
+    <div class="slide-number">11</div>
+    <h2>From Convergence to Wall-Clock</h2>
+    <p>The experiment gives loss against bytes. Whether that saves time depends on the system: link rates, latencies, how much of each sync overlaps with compute, and whether the module adds delay or energy. That question belongs to a discrete-event simulation, which is the part of this work that falls to a simulation engineer.</p>
+    <div class="diagram-flow">
+        <span class="diagram-box">workers: inner steps</span>
+        <span class="diagram-arrow">&rarr;</span>
+        <span class="diagram-box accent">in-transit module: budget, latency, energy</span>
+        <span class="diagram-arrow">&rarr;</span>
+        <span class="diagram-box">cross-data-centre link</span>
+        <span class="diagram-arrow">&rarr;</span>
+        <span class="diagram-box">aggregate + outer step</span>
+    </div>
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>What the model holds</h4>
+            <ul>
+                <li><strong>Workers</strong> with a time per inner step and a sync interval H.</li>
+                <li><strong>Links</strong> with bandwidth and latency, from the same presets results.md uses.</li>
+                <li><strong>An in-transit module</strong> with an operations-per-byte budget, an added latency and an energy per byte; a kernel that exceeds the budget slows the link to the rate the module can sustain.</li>
+                <li><strong>Sync policy:</strong> blocking, or streamed in parameter subsets and overlapped with training, as in Streaming DiLoCo.</li>
+            </ul>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>What it reports</h4>
+            <ul>
+                <li>Wall-clock per outer step, and the share spent waiting on the link.</li>
+                <li>Link utilisation and energy per sync.</li>
+                <li><strong>Time to a target loss</strong>, combining the experiment's loss-against-bytes curves with the simulated time per byte.</li>
+            </ul>
+        </div>
+    </div>
+    <ul>
+        <li><strong>Calibration:</strong> compression ratios and loss curves from the experiment of <a href="#slide-10">slide 10</a>; link presets from <a href="https://github.com/BrendanJamesLynskey/Disaggregated_Inference_Sim">Disaggregated_Inference_Sim</a>; the module's budget from results.md section 1.</li>
+        <li><strong>Implementation:</strong> a SimPy model that extends Disaggregated_Inference_Sim with a training mode, so training and inference (deck 03) share one hardware description and cannot drift apart. Planned, not yet built.</li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-12">
+    <div class="slide-number">12</div>
+    <h2>Other Training Traffic</h2>
+    <div class="table-wrap">
+    <table>
+        <tr><th>Traffic</th><th>What a link module could do</th><th>Obstacle</th><th>Verdict</th></tr>
+        <tr><td><strong>Ring-attention KV blocks</strong></td><td>Compress each block in flight with a transform plus a fixed band; the FFT is in the set</td><td>Per-layer, latency-critical; the attention result must stay accurate, and KV blocks need not be smooth</td><td><span class="badge warn">possible</span> if blocks compress well; the same question as inference KV (deck 03)</td></tr>
+        <tr><td><strong>Pipeline-parallel activations</strong></td><td>Compress activations at stage boundaries</td><td>Low tolerance to noise: an error in the forward pass compounds through every later stage, and the backward pass depends on it</td><td><span class="badge bad">poor fit</span></td></tr>
+        <tr><td><strong>Checkpoints</strong></td><td>Erasure-code the checkpoint as it is written</td><td>Erasure coding uses finite-field arithmetic, which is in the set (modular arithmetic, NTT), but checkpoints are infrequent and off the critical path</td><td><span class="badge warn">niche</span></td></tr>
+        <tr><td><strong>Data-parallel sync</strong> (for comparison)</td><td>Transform + fixed band on the pseudo-gradient or momentum</td><td>Selection without comparisons; error feedback stays on the GPU</td><td><span class="badge ok">best candidate</span>, pending <a href="#slide-10">slide 10</a></td></tr>
+    </table>
+    </div>
+    <ul>
+        <li><strong>Tensor-parallel and MoE traffic</strong> stay on NVLink inside a node or rack and are latency-bound; this series does not treat them as targets.</li>
+        <li><strong>Aggregation</strong> of any of these needs a switch, not a link (<a href="#slide-05">slide 05</a>).</li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-13">
+    <div class="slide-number">13</div>
+    <h2>What to Take Away</h2>
+    <ul>
+        <li><strong>The data-parallel sync is the bulk transfer of LLM training:</strong> 16.06 GB of BF16 gradient for Llama-3-8B and 141.10 GB for Llama-3-70B, with a ring all-reduce sending 2(N&minus;1)/N times that per worker.</li>
+        <li><strong>Inside a cluster it is overlapped; across data centres it binds:</strong> 11.3 s per uncompressed Llama-3-70B update over 100 GbE (the interactive, <a href="#slide-04">slide 04</a>).</li>
+        <li><strong>Summing belongs in a switch.</strong> SwitchML and SHARP aggregate in the network; a link module sees one stream, so it can compress but not sum.</li>
+        <li><strong>Low-communication training already cuts the traffic</strong> by orders of magnitude at the endpoint: DiLoCo 500&times;, Streaming DiLoCo two orders of magnitude in bandwidth, MuLoCo 2-bit deltas, DeMo up to 85&times; less data per GPU.</li>
+        <li><strong>DeMo's compressor is half in a photonic module's operation set:</strong> the DCT is, top-k is not. A fixed frequency band is the comparison-free substitute, and it works only if momentum energy sits in the chosen band, which a planned experiment will measure.</li>
+        <li><strong>Next:</strong> <a href="https://brendanjameslynskey.github.io/CiT_03_Data_Movement_in_LLM_Inference/">deck 03</a> turns to inference: KV hand-off between prefill and decode, weight streaming, and what a link module could do to them.</li>
+    </ul>
+</section>
+
+<!-- ════════════════════════════════════ Footer ════════════════════════════════════ -->
+<footer class="footer">
+    <p>Part of the <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Compute_in_Transit">Compute in Transit series</a> &middot; <a href="https://brendanjameslynskey.github.io/LLM_Hub_Compute_in_Transit/#glossary">glossary: every concept and where it is explained</a> &middot; numbers: <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Compute_in_Transit/blob/main/analysis/results.md">analysis/results.md</a></p>
+    <p style="margin-top: 0.5rem; font-size: 0.8rem;"><a href="https://brendanjameslynskey.github.io/CiT_01_Compute_in_Transit/">&larr; 01 Compute in Transit</a> &middot; <a href="https://brendanjameslynskey.github.io/CiT_03_Data_Movement_in_LLM_Inference/">03 Data Movement in LLM Inference &rarr;</a></p>
+    <p style="margin-top: 0.5rem; font-size: 0.8rem;">Sister series: <a href="https://brendanjameslynskey.github.io/LLM_Hub_Fourier_Optics_Inference/">Fourier Optics for Inference</a> &middot; <a href="https://brendanjameslynskey.github.io/LLM_Hub_Inference_Simulators/">LLM Inference Simulators</a> &middot; <a href="https://brendanjameslynskey.github.io/FHE_Hub_Accelerator_Simulators/">FHE Accelerator Simulators</a></p>
+</footer>
+
+<script>
+    // Smooth scroll for TOC links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function (e) {
+            e.preventDefault();
+            const target = document.querySelector(this.getAttribute('href'));
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+
+    // Subtle fade-in on scroll
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0)';
+            }
+        });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.slide').forEach(slide => {
+        slide.style.opacity = '0';
+        slide.style.transform = 'translateY(30px)';
+        slide.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+        observer.observe(slide);
+    });
+</script>
+
+</body>
+</html>
